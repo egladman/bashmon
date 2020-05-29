@@ -1,0 +1,114 @@
+#!/bin/bash -e
+
+CLR_CYAN='\033[36m'
+CLR_YELLOW="\033[33m"
+CLR_NONE='\033[0m' # No color
+FL_DEBUG=0
+
+readonly watch_interval=5 # Seconds
+
+IFS=' ' read -r -a file_extensions_arr <<< "${1}"
+if [[ -z "${file_extensions_arr}" ]]; then
+    printf '%s\n' "Argument required. No file extensions specified" && exit 1
+fi
+
+watch_command="${2}"
+if [[ -z "${watch_command}" ]]; then
+    printf '%s\n' "Argument required. No command specified" && exit 1
+fi
+
+if [[ "${1}" = "-v" ]]; then
+    FL_DEBUG=1
+fi
+
+_log() {
+    printf '%b\n' "${0##*/}: ${*}" 1>&2
+}
+
+_warn() {
+    _log "${CLR_YELLOW}WARN:${CLR_NONE} ${*}"
+}
+
+_debug() {
+    if [[ $FL_DEBUG -eq 1 ]]; then
+        _log "${CLR_CYAN}DEBUG:${CLR_NONE} ${*}"
+    fi
+}
+
+_generate_md5() {
+    printf '%s' "$(md5sum "${1}" | cut -d' ' -f1)"
+}
+
+_find() {
+    local regex_substring=""
+    local files_found_arr=()
+    local arr=("${@}")
+
+    for extension in "${arr[@]}"; do
+        regex_substring+="${extension}"
+        if [[ "${extension}" == "${arr[-1]}" ]]; then # We've reached the end
+            regex_substring+="\\"
+        else
+            regex_substring+="\|"
+        fi
+    done
+
+    regex=".*\.\(${regex_substring})"
+
+    # When the delimiter is an empty readarray will terminate a line when it
+    # reads any NUL character
+    readarray -d '' files_found_arr < <(find . -regex "${regex}" -print0)
+    #_debug "${FUNCNAME[0]} [set] array: files_found_arr='${files_found_arr[@]}'"
+
+    printf '%s ' ${files_found_arr[@]}
+}
+
+_generate_hash() {
+    # Usage: _generate_hash <file>
+    # if no args are passed in the func will loop through array: file_extensions_arr
+    local files_arr
+    IFS=' ' read -r -a files_arr <<< "${1}"
+    _debug "${FUNCNAME[0]} [set] array: files_arr='${files_arr[@]}'"
+
+    if [[ -z "${1}" ]]; then
+        files_arr=( $(_find ${file_extensions_arr[@]}) )
+        _debug "${FUNCNAME[0]} [modified] array: files_arr='${files_arr[@]}'"
+    fi
+
+    # Declare automatically implies local. So we don't need to worrying about scoping
+    #declare -A hash_arr # Associative array
+    for file in "${files_arr[@]}"; do
+        local hash_value="$(_generate_md5 ${file})"
+        hash_arr["${file}"]="${hash_value}"
+    done
+}
+
+_watch() {
+    declare -A hash_arr
+    _generate_hash
+
+    _log "Watching..."
+    while sleep ${watch_interval}; do
+        for key in ${!hash_arr[@]}; do
+            local value=${hash_arr[${key}]}
+            local md5_now="$(_generate_md5 "${key}")"
+            if [[ "${value}" != "${md5_now}" ]]; then
+                _debug "${FUNCNAME[0]} Detected change for file: ${key} with md5: ${value}"
+                hash_arr["${key}"]="${md5_now}"
+
+                eval "${watch_command}"
+                local watch_command_rc=$?
+                _warn "File: '${key}' modified. Ran: '${watch_command}'. Returned code: '${watch_command_rc}'"
+                continue
+            else
+                _debug "${FUNCNAME[0]} Detected no change for file: ${key} with md5: ${value}"
+            fi
+        done
+    done
+}
+
+main() {
+    _watch
+}
+
+main
