@@ -13,6 +13,7 @@ if [[ -z "${file_extensions_arr}" ]]; then
 fi
 
 watch_command="${2}"
+watch_command_rc=""
 if [[ -z "${watch_command}" ]]; then
     printf '%s\n' "Argument required. No command specified" && exit 1
 fi
@@ -37,6 +38,13 @@ _debug() {
 
 _generate_md5() {
     printf '%s' "$(md5sum "${1}" | cut -d' ' -f1)"
+}
+
+_eval() {
+    set +o errexit # Disable
+    eval "${*}"
+    watch_command_rc="${?}"
+    set -o errexit # Enable
 }
 
 _find() {
@@ -96,8 +104,7 @@ _watch() {
                 _debug "${FUNCNAME[0]} Detected change for file: ${key} with md5: ${value}"
                 hash_arr["${key}"]="${md5_now}"
 
-                eval "${watch_command}"
-                local watch_command_rc=$?
+                _eval "${watch_command}"
                 _warn "File: '${key}' modified. Ran: '${watch_command}'. Returned code: '${watch_command_rc}'"
                 continue
             else
