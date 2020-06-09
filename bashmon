@@ -115,6 +115,7 @@ _watch() {
 }
 
 main() {
+    _eval "${watch_command}"
     _watch
 }
 
